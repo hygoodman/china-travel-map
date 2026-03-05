@@ -1,5 +1,75 @@
 <!DOCTYPE html>
 <html>
+    <style>
+/* 删除缩放按钮 */
+.leaflet-control-zoom{display:none!important;}
+
+/* 右上时间轴顶格贴边 */
+#timeline-panel{
+  top:calc(env(safe-area-inset-top) + 8px)!important;
+  right:8px!important;
+  border-radius:12px!important;
+  box-shadow:0 8px 20px rgba(0,0,0,0.12)!important;
+}
+
+/* 彻底隐藏左上角所有 Leaflet 控件（你不想要左上按钮） */
+.leaflet-top.leaflet-left .leaflet-control{display:none!important;}
+
+/* 把默认 LayerControl UI 隐藏掉，但保留 DOM（给我们读取 checkbox 用） */
+.leaflet-control-layers{
+  opacity:0!important;
+  pointer-events:none!important;
+  width:0!important;height:0!important;
+  overflow:hidden!important;
+}
+
+/* 右下角 B2 图层弹层（Leaflet Control 版，iPhone 可点击） */
+.custom-layer-control .fab{
+  width:46px;height:46px;border-radius:14px;border:none;
+  background:rgba(255,255,255,0.92);
+  box-shadow:0 12px 26px rgba(0,0,0,0.16);
+  cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  -webkit-tap-highlight-color: transparent;
+}
+.custom-layer-control .fab i{color:#111827;font-size:18px;}
+.custom-layer-control .popover{
+  position:absolute;
+  right:0;
+  bottom:56px;
+  width:240px;
+  background:rgba(255,255,255,0.92);
+  backdrop-filter:blur(8px);
+  -webkit-backdrop-filter:blur(8px);
+  border-radius:16px;
+  box-shadow:0 18px 40px rgba(0,0,0,0.18);
+  padding:10px;
+  display:none;
+}
+.custom-layer-control .pop-title{
+  font-weight:900;font-size:13px;color:#111827;
+  display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:8px;
+}
+.custom-layer-control .pop-close{
+  border:none;background:rgba(17,24,39,0.08);
+  color:#111827;border-radius:10px;
+  padding:6px 10px;cursor:pointer;
+  font-weight:900;font-size:12px;
+}
+.custom-layer-control .row{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:8px 6px;border-radius:12px;
+}
+.custom-layer-control .row:hover{background:rgba(17,24,39,0.06);}
+.custom-layer-control .label{font-size:13px;color:#111827;font-weight:800;}
+.custom-layer-control .switch{position:relative;width:42px;height:24px;}
+.custom-layer-control .switch input{display:none;}
+.custom-layer-control .slider{position:absolute;inset:0;background:rgba(17,24,39,0.18);border-radius:999px;transition:.2s;}
+.custom-layer-control .slider:before{content:"";position:absolute;width:18px;height:18px;left:3px;top:3px;background:#fff;border-radius:999px;box-shadow:0 4px 10px rgba(0,0,0,0.18);transition:.2s;}
+.custom-layer-control .switch input:checked + .slider{background:rgba(17,24,39,0.85);}
+.custom-layer-control .switch input:checked + .slider:before{transform:translateX(18px);}
+</style>
 <head>
     
     <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
@@ -208,7 +278,108 @@
 .custom-layer-control .switch input:checked + .slider{background:rgba(17,24,39,0.85);}
 .custom-layer-control .switch input:checked + .slider:before{transform:translateX(18px);}
 </style>
+<script>
+(function(){
+  function qsa(s){return Array.from(document.querySelectorAll(s));}
 
+  // 找到 folium 生成的 map_ 变量
+  var mapObj=null;
+  for(var k in window){
+    try{
+      if(k.startsWith("map_") && window[k] && typeof window[k].eachLayer==="function"){mapObj=window[k];break;}
+    }catch(e){}
+  }
+  if(!mapObj || !window.L) return;
+
+  // 右下角按钮做成 Leaflet Control（解决 iPhone 点击失灵）
+  var LayerCtl = L.Control.extend({
+    options:{position:"bottomright"},
+    onAdd:function(){
+      var c = L.DomUtil.create("div","custom-layer-control");
+      c.innerHTML = `
+        <button class="fab" type="button" aria-label="图层">
+          <i class="fa fa-layer-group"></i>
+        </button>
+        <div class="popover" role="dialog" aria-label="图层开关">
+          <div class="pop-title">
+            <span>图层</span>
+            <button class="pop-close" type="button">关闭</button>
+          </div>
+          <div class="row">
+            <div class="label">城市标注</div>
+            <label class="switch"><input type="checkbox" id="togMarkers" checked><span class="slider"></span></label>
+          </div>
+          <div class="row">
+            <div class="label">旅行轨迹</div>
+            <label class="switch"><input type="checkbox" id="togRoute" checked><span class="slider"></span></label>
+          </div>
+          <div class="row">
+            <div class="label">站点编号</div>
+            <label class="switch"><input type="checkbox" id="togNums" checked><span class="slider"></span></label>
+          </div>
+        </div>
+      `;
+      L.DomEvent.disableClickPropagation(c);
+      L.DomEvent.disableScrollPropagation(c);
+      return c;
+    }
+  });
+  mapObj.addControl(new LayerCtl());
+
+  function findInput(text){
+    var labels=qsa(".leaflet-control-layers label");
+    for(var i=0;i<labels.length;i++){
+      var lbl=labels[i];
+      if(lbl && lbl.textContent && lbl.textContent.includes(text)){
+        var inp = lbl.querySelector("input");
+        if(inp) return inp;
+      }
+    }
+    return null;
+  }
+
+  var root=document.querySelector(".custom-layer-control");
+  if(!root) return;
+  var fab=root.querySelector(".fab");
+  var pop=root.querySelector(".popover");
+  var close=root.querySelector(".pop-close");
+
+  var inpMarkers=null, inpRoute=null, inpNums=null;
+  function sync(){
+    inpMarkers=findInput("城市标注");
+    inpRoute=findInput("旅行轨迹");
+    inpNums=findInput("站点编号");
+    var t1=root.querySelector("#togMarkers"), t2=root.querySelector("#togRoute"), t3=root.querySelector("#togNums");
+    if(inpMarkers && t1) t1.checked=!!inpMarkers.checked;
+    if(inpRoute && t2) t2.checked=!!inpRoute.checked;
+    if(inpNums && t3) t3.checked=!!inpNums.checked;
+  }
+  function show(on){ pop.style.display = on ? "block":"none"; }
+
+  fab.addEventListener("click", function(){
+    sync();
+    show(pop.style.display!=="block");
+  });
+  close.addEventListener("click", function(){ show(false); });
+
+  // 点地图空白处关闭
+  mapObj.getContainer().addEventListener("click", function(){
+    if(pop.style.display==="block") show(false);
+  });
+
+  function wire(sel, getter){
+    var t=root.querySelector(sel);
+    if(!t) return;
+    t.addEventListener("change", function(){
+      var inp=getter();
+      if(inp && inp.checked!==t.checked) inp.click();
+    });
+  }
+  wire("#togMarkers", function(){return inpMarkers;});
+  wire("#togRoute", function(){return inpRoute;});
+  wire("#togNums", function(){return inpNums;});
+})();
+</script>
 </head>
 <body>
     
